@@ -1,0 +1,8 @@
+{
+    "tool_name": "calculator",
+    "arguments": {
+        "operation": "add",
+        "a": 5,
+        "b": 3
+    }
+}

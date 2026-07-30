@@ -1,0 +1,14 @@
+{
+    "name": "calculator",
+    "description": "Performs basic arithmetic operations.",
+    "endpoint": "http://localhost:8081/calculate",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "operation": {"type": "string", "enum": ["add", "subtract", "multiply", "divide"]},
+            "a": {"type": "number"},
+            "b": {"type": "number"}
+        },
+        "required": ["operation", "a", "b"]
+    }
+}

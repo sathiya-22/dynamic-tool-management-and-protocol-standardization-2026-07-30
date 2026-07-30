@@ -1,0 +1,12 @@
+{
+    "name": "weather_forecast",
+    "description": "Fetches the current weather for a given city.",
+    "endpoint": "http://localhost:8082/weather",
+    "schema": {
+        "type": "object",
+        "properties": {
+            "city": {"type": "string", "description": "The city name for weather forecast"}
+        },
+        "required": ["city"]
+    }
+}
