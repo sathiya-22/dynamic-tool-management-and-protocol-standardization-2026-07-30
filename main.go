@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -8,6 +9,8 @@ import (
 	"sync"
 
 	"github.com/go-playground/validator/v10"
+	"github.com/santhosh-tekuri/jsonschema/v5"
+	_ "github.com/santhosh-tekuri/jsonschema/v5/httploader" // Required for schema $ref resolution
 )
 
 // ToolSchema represents the JSON schema for tool arguments
@@ -31,11 +34,17 @@ type ToolCall struct {
 type ToolRegistry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool
+	// Compiler to compile JSON schemas for validation
+	schemaCompiler *jsonschema.Compiler
 }
 
 func NewToolRegistry() *ToolRegistry {
+	compiler := jsonschema.NewCompiler()
+	// Optionally, add custom format checkers or load external schemas
+	// For now, default compiler is sufficient.
 	return &ToolRegistry{
-		tools: make(map[string]Tool),
+		tools:          make(map[string]Tool),
+		schemaCompiler: compiler,
 	}
 }
 
@@ -47,6 +56,17 @@ func (tr *ToolRegistry) RegisterTool(tool Tool) error {
 	if _, exists := tr.tools[tool.Name]; exists {
 		return fmt.Errorf("tool '%s' already registered", tool.Name)
 	}
+
+	// Compile the schema upon registration to catch errors early
+	schemaData, err := json.Marshal(tool.Schema)
+	if err != nil {
+		return fmt.Errorf("failed to marshal tool schema for compilation: %w", err)
+	}
+	// Use a unique URI for each schema, e.g., based on tool name
+	if _, err := tr.schemaCompiler.Compile(fmt.Sprintf("tool://%s/schema", tool.Name), bytes.NewReader(schemaData)); err != nil {
+		return fmt.Errorf("failed to compile schema for tool '%s': %w", tool.Name, err)
+	}
+
 	tr.tools[tool.Name] = tool
 	log.Printf("Tool '%s' registered: %s", tool.Name, tool.Endpoint)
 	return nil
@@ -79,6 +99,9 @@ func (tr *ToolRegistry) RemoveTool(name string) error {
 		return fmt.Errorf("tool '%s' not found", name)
 	}
 	delete(tr.tools, name)
+	// Also remove the compiled schema from the compiler's cache if necessary,
+	// though the compiler's current design doesn't provide a direct way to unload.
+	// For this prototype, we'll rely on garbage collection or restart.
 	log.Printf("Tool '%s' unregistered", name)
 	return nil
 }
@@ -155,10 +178,18 @@ func (s *ATRPServer) handleExecuteTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// In a real system, you'd perform JSON schema validation here on toolCall.Arguments
-	// against tool.Schema. For simplicity in this prototype, we skip full schema validation
-	// and assume the agent provides valid arguments per the registered schema.
-	// A more robust implementation would use a library like 'gojsonschema'
+	// Perform JSON schema validation here on toolCall.Arguments against tool.Schema.
+	schema, err := s.registry.schemaCompiler.GetSchema(fmt.Sprintf("tool://%s/schema", tool.Name))
+	if err != nil {
+		log.Printf("Error retrieving compiled schema for tool '%s': %v", tool.Name, err)
+		http.Error(w, fmt.Sprintf("Internal server error: failed to get schema for tool '%s'", tool.Name), http.StatusInternalServerError)
+		return
+	}
+
+	if err = schema.Validate(toolCall.Arguments); err != nil {
+		http.Error(w, fmt.Sprintf("Tool arguments validation failed for '%s': %s", tool.Name, err.Error()), http.StatusBadRequest)
+		return
+	}
 
 	log.Printf("Forwarding tool call for '%s' to %s with args: %v", tool.Name, tool.Endpoint, toolCall.Arguments)
 
